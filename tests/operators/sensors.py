@@ -22,12 +22,18 @@ import unittest
 from mock import patch
 from datetime import datetime, timedelta
 
-from airflow import DAG, configuration
-from airflow.operators.sensors import HttpSensor, BaseSensorOperator, HdfsSensor
+from airflow import DAG, configuration, jobs, settings
+from airflow.jobs import BackfillJob, SchedulerJob
+from airflow.models import TaskInstance, DagModel, DagBag
+from airflow.operators.sensors import HttpSensor, BaseSensorOperator, HdfsSensor, ExternalTaskSensor
+from airflow.operators.bash_operator import BashOperator
+from airflow.operators.dummy_operator import DummyOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.exceptions import (AirflowException,
                                 AirflowSensorTimeout,
                                 AirflowSkipException)
+from airflow.utils.state import State
+from tests.core import TEST_DAG_FOLDER
 configuration.load_test_config()
 
 DEFAULT_DATE = datetime(2015, 1, 1)
@@ -254,3 +260,55 @@ class HdfsSensorTests(unittest.TestCase):
         # Then
         with self.assertRaises(AirflowSensorTimeout):
             task.execute(None)
+
+class ExternalTaskSensorTests(unittest.TestCase):
+
+    def setUp(self):
+        configuration.load_test_config()
+        self.args = {'owner': 'airflow', 'start_date': DEFAULT_DATE}
+        self.default_scheduler_args = {"file_process_interval": 0,
+                                       "processor_poll_interval": 0.5,
+                                       "num_runs": 1}
+        self.dagbag = DagBag(dag_folder=TEST_DAG_FOLDER)
+
+    def test_external_task_sensor_fn_multiple_execution_dates(self):
+        dag_external_id = TEST_DAG_ID + '_secondly_external'
+        dag_id = TEST_DAG_ID + '_minutely'
+
+        session = settings.Session()
+        TI = TaskInstance
+        scheduler = SchedulerJob(dag_external_id,
+                                 **self.default_scheduler_args)
+        scheduler.run()
+
+        dag_external = self.dagbag.get_dag(dag_external_id)
+        dag_external.clear()
+
+        backfill = BackfillJob(
+            dag=dag_external,
+            start_date=DEFAULT_DATE,
+            end_date=DEFAULT_DATE + timedelta(seconds=1))
+        try:
+            backfill.run()
+        # The test_with_failure task is excepted to fail
+        # once per minute (the run on the first second of
+        # each minute).
+        except Exception as e:
+            failed_tis = session.query(TI).filter(
+                TI.dag_id == dag_external_id,
+                TI.state == State.FAILED,
+                TI.execution_date == DEFAULT_DATE + timedelta(seconds=1)).all()
+            if (len(failed_tis) == 1 and failed_tis[0].task_id == 'test_with_failure'):
+                pass
+            else:
+                raise e
+
+        dag = self.dagbag.get_dag(dag_id)
+        dag.clear()
+
+        task_without_failure = dag.get_task('test_external_task_sensor_multiple_dates_without_failure')
+        task_without_failure.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE, ignore_ti_state=True)
+
+        task_with_failure = dag.get_task('test_external_task_sensor_multiple_dates_with_failure')
+        with self.assertRaises(AirflowSensorTimeout):
+            task_with_failure.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE, ignore_ti_state=True)
