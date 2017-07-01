@@ -188,6 +188,10 @@
               type="button" class="btn active" data-toggle="button">
                Recursive
             </button>
+            <button id="btn_descendants"
+              type="button" class="btn" data-toggle="button">
+               Descendents
+            </button>
           </span>
           <hr/>
           <button id="btn_success" type="button" class="btn btn-primary">
@@ -363,6 +367,7 @@ function updateQueryStringParameter(uri, key, value) {
         "&downstream=" + $('#btn_downstream').hasClass('active') +
         "&recursive=" + $('#btn_recursive').hasClass('active') +
         "&execution_date=" + encodeURIComponent(execution_date) +
+        "&descendants=" + $('#btn_descendants').hasClass('active') +
         "&origin=" + encodeURIComponent(window.location);
       window.location = url;
     });
