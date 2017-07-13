@@ -266,9 +266,6 @@ class ExternalTaskSensorTests(unittest.TestCase):
     def setUp(self):
         configuration.load_test_config()
         self.args = {'owner': 'airflow', 'start_date': DEFAULT_DATE}
-        self.default_scheduler_args = {"file_process_interval": 0,
-                                       "processor_poll_interval": 0.5,
-                                       "num_runs": 1}
         self.dagbag = DagBag(dag_folder=TEST_DAG_FOLDER)
 
     def test_external_task_sensor_fn_multiple_execution_dates(self):
@@ -277,19 +274,12 @@ class ExternalTaskSensorTests(unittest.TestCase):
 
         session = settings.Session()
         TI = TaskInstance
-        scheduler = SchedulerJob(dag_external_id,
-                                 **self.default_scheduler_args)
-        scheduler.run()
-
         dag_external = self.dagbag.get_dag(dag_external_id)
         dag_external.clear()
 
-        backfill = BackfillJob(
-            dag=dag_external,
-            start_date=DEFAULT_DATE,
-            end_date=DEFAULT_DATE + timedelta(seconds=1))
         try:
-            backfill.run()
+            dag_external.run(start_date=DEFAULT_DATE,
+                end_date=DEFAULT_DATE + timedelta(seconds=1))
         # The test_with_failure task is excepted to fail
         # once per minute (the run on the first second of
         # each minute).
