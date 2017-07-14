@@ -3055,17 +3055,16 @@ class DAG(BaseDag, LoggingMixin):
         session.close()
         return execution_date
 
-    def descendants(self, dagbag, task_ids=[], include_downstream=False,
+    def descendants(self, dagbag, task_ids=None, include_downstream=False,
                     include_upstream=False, recursive=False):
         from airflow.operators.sensors import ExternalTaskSensor
         if not task_ids:
             task_ids = self.task_ids
         descendants = []
-        for dag_name, dag in dagbag.dags.items():
-            tasks = [task for task in dag.tasks
-                     if isinstance(task, ExternalTaskSensor) and
-                        task.external_dag_id == self.dag_id and
-                        task.external_task_id in task_ids]
+        for _, dag in dagbag.dags.items():
+            tasks = [task for task in dag.tasks if isinstance(task, ExternalTaskSensor) and
+                task.external_dag_id == self.dag_id and
+                task.external_task_id in task_ids]
             if not tasks:
                 continue
             task_regex = "|".join(map(lambda x: "^{0}$".format(x.task_id), tasks))
@@ -3075,7 +3074,10 @@ class DAG(BaseDag, LoggingMixin):
                 include_upstream=include_upstream)
             descendants.append(dependent_dag)
             if recursive:
-                descendants.extend(dependent_dag.descendants(dagbag, include_downstream=include_downstream, include_upstream=include_upstream, recursive=recursive))
+                descendants.extend(dependent_dag.descendants(dagbag,
+                    include_downstream=include_downstream,
+                    include_upstream=include_upstream,
+                    recursive=recursive))
         return descendants
 
     @property

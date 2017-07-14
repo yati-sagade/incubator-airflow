@@ -1072,8 +1072,8 @@ class Airflow(BaseView):
 
         if descendants:
             dags.extend(dag.descendants(
-            dagbag, task_ids=[task_id], include_downstream=downstream,
-            include_upstream=upstream, recursive=recursive))
+                dagbag, task_ids=[task_id], include_downstream=downstream,
+                include_upstream=upstream, recursive=recursive))
 
         end_date = execution_date if not future else None
         start_date = execution_date if not past else None
@@ -1097,7 +1097,7 @@ class Airflow(BaseView):
         dags = [dag]
 
         if descendants:
-            dags.extend(dag.descendants(dagbag, task_ids=[task_id], recursive=recursive))
+            dags.extend(dag.descendants(dagbag, task_ids=[task_id], recursive=True))
 
         execution_date = dateutil.parser.parse(execution_date)
         start_date = execution_date
