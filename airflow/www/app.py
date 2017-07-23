@@ -58,6 +58,7 @@ def create_app(config=None, testing=False):
 
     with app.app_context():
         from airflow.www import views
+        app.dagbag = views.dagbag
 
         admin = Admin(
             app, name='Airflow',

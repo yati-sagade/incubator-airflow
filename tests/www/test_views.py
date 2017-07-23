@@ -13,12 +13,18 @@
 # limitations under the License.
 
 import unittest
+import re
 
-from airflow import configuration
+from airflow import configuration, settings
 from airflow import models
+from airflow.operators.dummy_operator import DummyOperator
+from airflow.operators.sensors import ExternalTaskSensor
 from airflow.settings import Session
 from airflow.www import app as application
+from datetime import datetime, timedelta
 
+DEFAULT_DATE = datetime(2015, 1, 1)
+TEST_DAG_ID = 'unit_tests'
 
 class TestKnownEventView(unittest.TestCase):
 
@@ -156,6 +162,92 @@ class TestPoolModelView(unittest.TestCase):
         self.assertIn('This field is required.', response.data.decode('utf-8'))
         self.assertEqual(self.session.query(models.Pool).count(), 0)
 
+
+class ClearViewTests(unittest.TestCase):
+    def setUp(self):
+        configuration.load_test_config()
+        app = application.create_app(testing=True)
+        app.config['WTF_CSRF_METHODS'] = []
+        self.app = app.test_client()
+        self.args = {
+            'owner': 'airflow', 'start_date': DEFAULT_DATE,
+            'depends_on_past': False, 'retries': 3}
+        self.dagbag = app.dagbag
+
+    def test_dag_clear_view_with_descendants(self):
+        def _run_dag(dag):
+            for task in dag.topological_sort():
+                task.run(
+                    start_date=DEFAULT_DATE,
+                    end_date=DEFAULT_DATE + timedelta(seconds=1),
+                    ignore_ti_state=True)
+
+        def _parse_view(html):
+            # If the way task instances are serialized changes (str(TaskInstance))
+            # this regexp won't work anymore but I cannot find another way to
+            # parse the html
+            pattern = r"TaskInstance:\s+(\w+)\.(\w+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+\[\w+\]"
+            return re.findall(pattern, html)
+
+        dag_core_id = TEST_DAG_ID + '_core'
+        dag_core = models.DAG(
+            dag_core_id, default_args=self.args,
+            schedule_interval=timedelta(seconds=1))
+        with dag_core:
+            task_core = DummyOperator(task_id='task_core')
+
+        dag_first_child_id = TEST_DAG_ID + '_first_child'
+        dag_first_child = models.DAG(
+            dag_first_child_id, default_args=self.args,
+            schedule_interval=timedelta(seconds=1))
+        with dag_first_child:
+            t1_first_child = ExternalTaskSensor(
+                task_id='t1_first_child',
+                external_dag_id=dag_core_id,
+                external_task_id='task_core',
+                poke_interval=1)
+            t2_first_child = DummyOperator(
+                task_id='t2_first_child')
+            t1_first_child >> t2_first_child
+
+        dag_second_child_id = TEST_DAG_ID + '_second_child'
+        dag_second_child = models.DAG(
+            dag_second_child_id, default_args=self.args,
+            schedule_interval=timedelta(seconds=1))
+        with dag_second_child:
+            t1_second_child = ExternalTaskSensor(
+                task_id='t1_second_child',
+                external_dag_id=dag_first_child_id,
+                external_task_id='t2_first_child',
+                poke_interval=1)
+            t2_second_child = DummyOperator(
+                task_id='t2_second_child',
+                dag=dag_second_child)
+
+
+        all_dags = [dag_core, dag_first_child, dag_second_child]
+        all_dag_ids = [dag.dag_id for dag in all_dags]
+        all_task_ids = [task_id for dag in all_dags for task_id in dag.task_ids]
+
+        for dag in all_dags:
+            self.dagbag.bag_dag(dag, dag, dag)
+            _run_dag(dag)
+        to_rerun_task_ids = [ task_id for task_id in all_task_ids if task_id != 't2_second_child']
+        session = settings.Session()
+        TI = models.TaskInstance
+        tis = session.query(TI).filter(TI.dag_id.in_(all_dag_ids),
+            TI.task_id.in_(to_rerun_task_ids)).all()
+        tis = [(ti.dag_id, ti.task_id, str(ti.execution_date)) for ti in tis]
+        url = (
+            "/admin/airflow/clear?task_id=task_core&"
+            "dag_id={}&future=true&past=false&"
+            "upstream=false&downstream=true&recursive=true&"
+            "descendants=true&execution_date={}&"
+            "origin=/admin".format(dag_core_id, DEFAULT_DATE))
+        response = self.app.get(url)
+        html = response.data.decode('utf-8')
+        tasks = _parse_view(html)
+        self.assertEqual(sorted(tis), sorted(tasks))
 
 if __name__ == '__main__':
     unittest.main()

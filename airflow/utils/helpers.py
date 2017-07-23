@@ -378,3 +378,10 @@ class AirflowImporter(object):
             return loaded_attribute
 
         raise AttributeError
+
+def regex_from_task_id_list(task_id_list):
+    if not task_id_list:
+        return ''
+    return '^(?:{})$'.format(
+        '|'.join(task_id_list))
+

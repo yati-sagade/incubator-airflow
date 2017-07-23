@@ -34,7 +34,9 @@ from airflow.operators.dummy_operator import DummyOperator
 from airflow.operators.bash_operator import BashOperator
 from airflow.operators.python_operator import PythonOperator
 from airflow.operators.python_operator import ShortCircuitOperator
+from airflow.operators.sensors import ExternalTaskSensor
 from airflow.ti_deps.deps.trigger_rule_dep import TriggerRuleDep
+from airflow.utils.helpers import regex_from_task_id_list
 from airflow.utils.state import State
 from mock import patch
 from parameterized import parameterized
@@ -291,47 +293,178 @@ class DagTest(unittest.TestCase):
         self.assertEqual(result, 'Hello world')
 
     def test_descendants(self):
-        dagbag = models.DagBag(dag_folder=TEST_DAGS_FOLDER)
         dag_core_id = TEST_DAG_ID + '_core'
-        dag_first_child = TEST_DAG_ID + '_first_child'
-        dag_core = dagbag.get_dag(dag_core_id)
-        dag_first_child = dagbag.get_dag(dag_first_child)
+        dag_core = DAG(dag_core_id, start_date=DEFAULT_DATE)
+        with dag_core:
+            task_core = DummyOperator(task_id='task_core')
+
+        dag_child = DAG(
+            TEST_DAG_ID + '_child',
+            start_date=DEFAULT_DATE)
+        with dag_child:
+            t1_child = ExternalTaskSensor(
+                task_id='t1_child',
+                external_dag_id=dag_core_id,
+                external_task_id='task_core')
+
+        dagbag = models.DagBag()
+        dagbag.bag_dag(dag_core, parent_dag=dag_core, root_dag=dag_core)
+        dagbag.bag_dag(dag_child, parent_dag=dag_child, root_dag=dag_child)
+
         descendants = dag_core.descendants(dagbag)
+
         self.assertEqual(len(descendants), 1)
-        self.assertEqual(descendants[0], dag_first_child.sub_dag(task_regex=r"^t1_first_child$"))
+        self.assertEqual(
+            descendants[0],
+            dag_child.sub_dag(task_regex=r"^t1_child$"))
 
     def test_descendants_upstream(self):
-        dagbag = models.DagBag(dag_folder=TEST_DAGS_FOLDER)
         dag_core_id = TEST_DAG_ID + '_core'
-        dag_first_child = TEST_DAG_ID + '_first_child'
-        dag_core = dagbag.get_dag(dag_core_id)
-        dag_first_child = dagbag.get_dag(dag_first_child)
+        dag_core = DAG(dag_core_id, start_date=DEFAULT_DATE)
+        with dag_core:
+            task_core = DummyOperator(task_id='task_core')
+
+        dag_child = DAG(
+            TEST_DAG_ID + '_child',
+            start_date=DEFAULT_DATE)
+        with dag_child:
+            t0_child = DummyOperator(task_id='t0_child')
+            t1_child = ExternalTaskSensor(
+                task_id='t1_child',
+                external_dag_id=dag_core_id,
+                external_task_id='task_core')
+            t0_child >> t1_child
+
+        dagbag = models.DagBag()
+        dagbag.bag_dag(dag_core, parent_dag=dag_core, root_dag=dag_core)
+        dagbag.bag_dag(dag_child, parent_dag=dag_child, root_dag=dag_child)
+
         descendants = dag_core.descendants(dagbag, include_upstream=True)
         self.assertEqual(len(descendants), 1)
-        self.assertEqual(descendants[0], dag_first_child.sub_dag(task_regex=r"^t1_first_child$"))
+        task_regex = regex_from_task_id_list(dag_child.task_ids)
+        self.assertEqual(
+            descendants[0],
+            dag_child.sub_dag(task_regex=r"{0}".format(task_regex)))
 
     def test_descendants_downstream(self):
-        dagbag = models.DagBag(dag_folder=TEST_DAGS_FOLDER)
         dag_core_id = TEST_DAG_ID + '_core'
-        dag_first_child = TEST_DAG_ID + '_first_child'
-        dag_core = dagbag.get_dag(dag_core_id)
-        dag_first_child = dagbag.get_dag(dag_first_child)
-        descendants = dag_core.descendants(dagbag, 'task_core', include_downstream=True)
-        self.assertEqual(len(descendants), 1)
-        self.assertEqual(descendants[0], dag_first_child.sub_dag(task_regex=r"^(t1_first_child|t2_first_child)$"))
+        dag_core = DAG(dag_core_id, start_date=DEFAULT_DATE)
+        with dag_core:
+            task_core = DummyOperator(task_id='task_core')
 
-    def test_descendants_downstream_recursive(self):
-        dagbag = models.DagBag(dag_folder=TEST_DAGS_FOLDER)
+        dag_child = DAG(
+            TEST_DAG_ID + '_child',
+            start_date=DEFAULT_DATE)
+        with dag_child:
+            t0_child = DummyOperator(task_id='t0_child')
+            t1_child = ExternalTaskSensor(
+                task_id='t1_child',
+                external_dag_id=dag_core_id,
+                external_task_id='task_core')
+            t2_child = DummyOperator(task_id='t2_child')
+            t0_child >> t1_child >> t2_child
+
+        dagbag = models.DagBag()
+        dagbag.bag_dag(dag_core, parent_dag=dag_core, root_dag=dag_core)
+        dagbag.bag_dag(dag_child, parent_dag=dag_child, root_dag=dag_child)
+
+        descendants = dag_core.descendants(dagbag, include_downstream=True)
+        self.assertEqual(len(descendants), 1)
+        task_regex = regex_from_task_id_list(['t1_child', 't2_child'])
+        self.assertEqual(
+            descendants[0],
+            dag_child.sub_dag(
+                task_regex=r"{0}".format(task_regex),
+                include_upstream=False))
+
+    def test_descendants_recursive(self):
         dag_core_id = TEST_DAG_ID + '_core'
-        dag_first_child = TEST_DAG_ID + '_first_child'
-        dag_second_child = TEST_DAG_ID + '_second_child'
-        dag_core = dagbag.get_dag(dag_core_id)
-        dag_first_child = dagbag.get_dag(dag_first_child)
-        dag_second_child = dagbag.get_dag(dag_second_child)
-        descendants = dag_core.descendants(dagbag, include_downstream=True, recursive=True)
+        dag_core = DAG(dag_core_id, start_date=DEFAULT_DATE)
+        with dag_core:
+            task_core = DummyOperator(task_id='task_core')
+
+        dag_first_child_id = TEST_DAG_ID + '_first_child'
+        dag_first_child = DAG(
+            dag_first_child_id,
+            start_date=DEFAULT_DATE)
+        with dag_first_child:
+            t1_first_child = ExternalTaskSensor(
+                task_id='t1_first_child',
+                external_dag_id=dag_core_id,
+                external_task_id='task_core')
+
+        dag_second_child = DAG(
+            TEST_DAG_ID + '_second_child',
+            start_date=DEFAULT_DATE)
+        with dag_second_child:
+            t1_second_child = ExternalTaskSensor(
+                task_id='t1_second_child',
+                external_dag_id=dag_first_child_id,
+                external_task_id='t1_first_child')
+
+        dagbag = models.DagBag()
+        dagbag.bag_dag(dag_core, dag_core, dag_core)
+        dagbag.bag_dag(dag_first_child, dag_first_child, dag_first_child)
+        dagbag.bag_dag(dag_second_child, dag_second_child, dag_second_child)
+
+        descendants = dag_core.descendants(dagbag, recursive=True)
+
         self.assertEqual(len(descendants), 2)
-        self.assertEqual(descendants[0], dag_first_child.sub_dag(task_regex=r"^(t1_first_child|t2_first_child)$"))
-        self.assertEqual(descendants[1], dag_second_child.sub_dag(task_regex=r"^t1_second_child$"))
+        self.assertEqual(
+            descendants[0],
+            dag_first_child.sub_dag(task_regex=r"^t1_first_child$"))
+        self.assertEqual(
+            descendants[1],
+            dag_second_child.sub_dag(task_regex=r"^t1_second_child$"))
+
+    def test_no_descendant(self):
+        dag_core = DAG(TEST_DAG_ID + '_core', start_date=DEFAULT_DATE)
+        with dag_core:
+            task_core = DummyOperator(task_id='task_core')
+
+        dag_other = DAG(
+            TEST_DAG_ID + '_other',
+            start_date=DEFAULT_DATE)
+        with dag_other:
+            t1_other = DummyOperator(task_id='t1_other')
+
+        dagbag = models.DagBag()
+        dagbag.bag_dag(dag_core, parent_dag=dag_core, root_dag=dag_core)
+        dagbag.bag_dag(dag_other, parent_dag=dag_other, root_dag=dag_other)
+
+        descendants = dag_core.descendants(dagbag)
+
+        self.assertEqual(len(descendants), 0)
+
+    def test_descendants_circular(self):
+        dag_core_id = TEST_DAG_ID + '_core'
+        dag_child_id = TEST_DAG_ID + '_child'
+
+        dag_core = DAG(dag_core_id, start_date=DEFAULT_DATE)
+        with dag_core:
+            t1_core = ExternalTaskSensor(
+                task_id='t1_core',
+                external_dag_id=dag_child_id,
+                external_task_id='t1_child')
+            t2_core = DummyOperator(task_id='t2_core')
+            t1_core >> t2_core
+
+        dag_child = DAG(
+            dag_child_id,
+            start_date=DEFAULT_DATE)
+        with dag_child:
+            t1_child = ExternalTaskSensor(
+                task_id='t1_child',
+                external_dag_id=dag_core_id,
+                external_task_id='t2_core')
+
+        dagbag = models.DagBag()
+        dagbag.bag_dag(dag_core, dag_core, dag_core)
+        dagbag.bag_dag(dag_child, dag_child, dag_child)
+
+        with self.assertRaises(AirflowException):
+            descendants = dag_core.descendants(dagbag, recursive=True)
+
 
 class DagStatTest(unittest.TestCase):
     def test_dagstats_crud(self):

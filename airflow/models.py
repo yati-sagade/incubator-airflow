@@ -74,7 +74,8 @@ from airflow.utils.db import provide_session
 from airflow.utils.decorators import apply_defaults
 from airflow.utils.email import send_email
 from airflow.utils.helpers import (
-    as_tuple, is_container, is_in, validate_key, pprinttable)
+    as_tuple, is_container, is_in, validate_key,
+    pprinttable, regex_from_task_id_list)
 from airflow.utils.logging import LoggingMixin
 from airflow.utils.operator_resources import Resources
 from airflow.utils.state import State
@@ -3067,11 +3068,16 @@ class DAG(BaseDag, LoggingMixin):
         session.close()
         return execution_date
 
-    def descendants(self, dagbag, task_ids=None, include_downstream=False,
-                    include_upstream=False, recursive=False):
+    def descendants(self, dagbag, task_ids=None,
+                    include_downstream=False, include_upstream=False,
+                    recursive=False, seen_tasks=None):
         from airflow.operators.sensors import ExternalTaskSensor
         if not task_ids:
             task_ids = self.task_ids
+
+        if not seen_tasks:
+            seen_tasks = set()
+
         descendants = []
         for _, dag in dagbag.dags.items():
             tasks = [task for task in dag.tasks if
@@ -3080,10 +3086,26 @@ class DAG(BaseDag, LoggingMixin):
                      task.external_task_id in task_ids]
             if not tasks:
                 continue
-            task_regex = "|".join(map(
-                lambda x: "^{0}$".format(x.task_id), tasks))
+
+            # Checking for circular dependencies
+            for task in tasks:
+                if task.task_id in seen_tasks:
+                    raise AirflowException(
+                        "A cyclic dependencies exists between "
+                        "dag {0} and dag {1}"
+                        .format(task.dag_id, task.external_dag_id))
+
+            external_task_ids = [task.external_task_id for task in tasks]
+            mark_as_seen = self.sub_dag(
+                task_regex=r"{0}".format(
+                    regex_from_task_id_list(external_task_ids)),
+                include_downstream=False,
+                include_upstream=True).task_ids
+            seen_tasks |= set(mark_as_seen)
+
             dependent_dag = dag.sub_dag(
-                task_regex=r"{0}".format(task_regex),
+                task_regex=r"{0}".format(
+                    regex_from_task_id_list([task.task_id for task in tasks])),
                 include_downstream=include_downstream,
                 include_upstream=include_upstream)
             descendants.append(dependent_dag)
@@ -3092,7 +3114,8 @@ class DAG(BaseDag, LoggingMixin):
                     dagbag,
                     include_downstream=include_downstream,
                     include_upstream=include_upstream,
-                    recursive=recursive))
+                    recursive=recursive,
+                    seen_tasks=seen_tasks))
         return descendants
 
     @property
