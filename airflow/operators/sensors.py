@@ -211,6 +211,8 @@ class ExternalTaskSensor(BaseSensorOperator):
             execution_delta=None,
             execution_date_fn=None,
             *args, **kwargs):
+        print("Args are {}, kwargs are {}".format("|".join(args), "|".join(kwargs.keys())))
+        print("TEMPLATE FIELDS BEFORE {}".format(self.template_fields))
         super(ExternalTaskSensor, self).__init__(*args, **kwargs)
         self.allowed_states = allowed_states or [State.SUCCESS]
         if execution_delta is not None and execution_date_fn is not None:
@@ -222,6 +224,7 @@ class ExternalTaskSensor(BaseSensorOperator):
         self.execution_date_fn = execution_date_fn
         self.external_dag_id = external_dag_id
         self.external_task_id = external_task_id
+        print("TEMPLATE FIELDS {}".format(self.template_fields))
 
     def poke(self, context):
         if self.execution_delta:

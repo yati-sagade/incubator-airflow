@@ -2367,6 +2367,7 @@ class BaseOperator(object):
 
     def resolve_template_files(self):
         # Getting the content of files for template_field / template_ext
+        print("for dag {} and task {} template_fields are {}".format(self.dag_id, self.task_id, self.template_fields))
         for attr in self.template_fields:
             content = getattr(self, attr)
             if content is not None and \

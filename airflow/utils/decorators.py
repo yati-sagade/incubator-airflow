@@ -82,7 +82,8 @@ def apply_defaults(func):
             raise AirflowException(msg)
 
         kwargs['params'] = dag_params
-
+        print("DAG PARAMS ARE {}, values are {}".format("|".join(map(str, dag_params.keys())), "|".join(map(str, dag_params.values()))))
+        print("DAG ARGS ARE {}, values are {}".format("|".join(map(str, dag_args.keys())), "|".join(map(str, dag_args.values()))))
         result = func(*args, **kwargs)
         return result
     return wrapper
