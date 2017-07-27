@@ -19,7 +19,24 @@ from airflow.models import DagRun
 from airflow.operators.sensors import BaseSensorOperator
 
 class DagRunSensor(BaseSensorOperator):
-    """Wait for certain DAG runs to finish"""
+    """
+    Waits for a DAG run to complete.
+
+    :param external_dag_id: The dag_id that you want to wait for
+    :type external_dag_id: string
+    :param allowed_states: list of allowed states, default is ``['success']``
+    :type allowed_states: list
+    :param execution_delta: time difference with the previous execution to
+        look at, the default is the same execution_date as the current task.
+        For yesterday, use [positive!] datetime.timedelta(days=1). Either
+        execution_delta or execution_date_fn can be passed to
+        DagRunSensor, but not both.
+    :type execution_delta: datetime.timedelta
+    :param execution_date_fn: function that receives the current execution date
+        and returns the desired execution dates to query. Either execution_delta
+        or execution_date_fn can be passed to DagRunSensor, but not both.
+    :type execution_date_fn: callable
+    """
     @apply_defaults
     def __init__(
             self,
@@ -33,7 +50,7 @@ class DagRunSensor(BaseSensorOperator):
         if execution_delta is not None and execution_date_fn is not None:
             raise ValueError(
                 'Only one of `execution_date` or `execution_date_fn` may'
-                'be provided to ExternalTaskSensor; not both.')
+                'be provided to DagRunSensor; not both.')
 
         self.allowed_states = allowed_states or [State.SUCCESS]
         self.execution_delta = execution_delta
