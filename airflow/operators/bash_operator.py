@@ -33,13 +33,18 @@ class BashOperator(BaseOperator):
         bash script (must be '.sh') to be executed.
     :type bash_command: string
     :param xcom_push: If xcom_push is True, the last line written to stdout
-        will also be pushed to an XCom when the bash command completes.
+        will also be pushed to an XCom when the bash command completes. If
+        process_output is defined the return of the process_output function
+        will be used instead.
     :type xcom_push: bool
     :param env: If env is not None, it must be a mapping that defines the
         environment variables for the new process; these are used instead
         of inheriting the current process environment, which is the default
         behavior. (templated)
     :type env: dict
+    :param process_output: A python function that can process the output of
+        the bash command. The returned value will be pushed to xcom
+    :type process_output: A lambda or defined function
     :type output_encoding: output encoding of bash command
     """
     template_fields = ('bash_command', 'env')
@@ -52,6 +57,7 @@ class BashOperator(BaseOperator):
             bash_command,
             xcom_push=False,
             env=None,
+            process_output=None,
             output_encoding='utf-8',
             *args, **kwargs):
 
@@ -60,6 +66,7 @@ class BashOperator(BaseOperator):
         self.env = env
         self.xcom_push_flag = xcom_push
         self.output_encoding = output_encoding
+        self.process_output = process_output
 
     def execute(self, context):
         """
@@ -95,9 +102,11 @@ class BashOperator(BaseOperator):
                 self.sp = sp
 
                 self.log.info("Output:")
+                output = ''
                 line = ''
                 for line in iter(sp.stdout.readline, b''):
                     line = line.decode(self.output_encoding).strip()
+                    output = output + line + "\n"
                     self.log.info(line)
                 sp.wait()
                 self.log.info(
@@ -107,6 +116,9 @@ class BashOperator(BaseOperator):
 
                 if sp.returncode:
                     raise AirflowException("Bash command failed")
+
+        if self.process_output:
+            return self.process_output(output)
 
         if self.xcom_push_flag:
             return line
