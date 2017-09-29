@@ -212,7 +212,7 @@ class HiveCliHook(BaseHook):
                 sp = subprocess.Popen(
                     hive_cmd,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
+                    stderr=subprocess.PIPE,
                     cwd=tmp_dir,
                     close_fds=True)
                 self.sp = sp
