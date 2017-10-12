@@ -94,7 +94,7 @@ var i = 0,
     duration = 400,
     root;
 
-var tree = d3.layout.tree().nodeSize([0, 25]);
+var tree = d3.layout.tree().nodeSize([0, 25]).sort(function(a, b) { return d3.ascending(a.name, b.name); });
 var nodes = tree.nodes(data);
 var nodeobj = {};
 for (i=0; i<nodes.length; i++) {
